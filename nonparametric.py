@@ -51,8 +51,12 @@ def binned_avg(a: np.ndarray, bin_size: int, no_trim=True) -> np.ndarray:
 def periodic_avg(a: np.ndarray, period: int, no_trim=True) -> np.ndarray:
     return reduce_periodic(np.mean, a, period, no_trim=no_trim)
 
+def conv_avg(y: np.ndarray, n: int) -> np.ndarray:
+    'sliding window average by convolution. n is window size'
+    kern = np.full(shape=n, fill_value=1/ n)
+    return np.convolve(y, kern, mode='same')
 
-def _test_binned_periodic_avg():
+def _test_visual_binned_periodic_avg():
     _xticks = np.arange(0, 24*2 + 7, 6)
     _x = np.arange(0., 24.*2 + 6, 0.5)
     _y = np.cos((_x - 12) * PIx2/ 24)
@@ -77,35 +81,56 @@ def interdaily_stability(data: np.ndarray, hour_avg: np.ndarray) -> float:
     denom = np.square(data - m).sum()
     return (num / denom) * (len(data) / 24)
 
-def _test_interdaily_stability_perfect_trend():
-    _xticks = np.arange(0, 24*2 + 7, 6)
-    _x = np.arange(0., 24.*2 + 6, 0.5)
-    _y = np.cos((_x - 12) * PIx2/ 24)
+IS = interdaily_stability
 
-    _y_hour_avg = periodic_avg(binned_avg(_y, bin_size=2), period=24)
-    _x_hour_avg = _x[:48:2]
+def __IS_test():
+    """
+    should be 1.0 for perfect autocorrelation, 
+    0 for white noise (precision depends on sampling rate)
+    """
+    AVG = periodic_avg
+    
+    x = np.arange(0., 24*10, 1.)
+    sin24 = np.cos(2*np.pi/24 * x)
+    cos24 = np.sin(2*np.pi/24 * x)
+    correlated = np.tile(np.random.randn(24), 10)
+    white = np.random.randn(1000)
+    
+    IS_sin = IS(sin24, AVG(sin24, period=24))
+    IS_cos = IS(cos24, AVG(cos24, period=24))
+    IS_corr = IS(correlated, AVG(correlated, period=24))
+    IS_white = IS(white, AVG(white, period=24))
+    assert abs(IS_sin - 1.0) < 0.05, abs(IS_sin - 1.0)
+    assert abs(IS_cos - 1.0) < 0.05, abs(IS_cos - 1.0) 
+    assert abs(IS_corr - 1.) < 0.05, abs(IS_corr - 1.)
+    assert abs(IS_white - 0.0) < 0.1, abs(IS_white - 0.0)
 
-    plt.plot(_x, _y, ls="none", marker="o", markersize=6)
-    plt.plot(_x_hour_avg, _y_hour_avg, ls="none", marker="o", markersize=6)
+def intradaily_variability(x: np.ndarray) -> float:
+    """
+    refer to
+    (Van Someren et al. 1999)
+    https://doi.org/10.3109/07420529908998724
+    """
+    mean = np.mean(x)
+    numerator = np.sum(np.diff(x)**2)/(len(x) - 1)
+    denominator = np.sum((x - mean)**2)/len(x)
+    return numerator/denominator
 
-    _stab = interdaily_stability(_y, _y_hour_avg)
-    plt.annotate(f"stab={_stab:.3f}", (0, 1))
-    plt.show()
+IV = intradaily_variability
 
-def _test_interdaily_stability_white_noise():
-    _xticks = np.arange(0, 24*2 + 7, 6)
-    _x = np.arange(0., 24.*2 + 6, 0.5)
-    _y = np.random.randn(*_x.shape)
+def __IV_test():
+    """
+    should be 0.0 for sine/cosine, and 2.0 for white noise 
+    (precision depends on sampling rate)
+    """
+    x = np.linspace(0., 10, 200)
+    sin = np.sin(x)
+    cos = np.cos(x)
+    white = np.random.randn(1000)
+    assert abs(IV(sin) - 0.0) < 0.05, abs(IV(cos) - 0.0)
+    assert abs(IV(cos) - 0.0) < 0.05, abs(IV(cos) - 0.0) 
+    assert abs(IV(white) - 2.0) < 0.15, abs(IV(white) - 2.0)
 
-    _y_hour_avg = periodic_avg(binned_avg(_y, bin_size=2), period=24)
-    _x_hour_avg = _x[:48:2]
-
-    plt.plot(_x, _y, ls="none", marker="o", markersize=6)
-    plt.plot(_x_hour_avg, _y_hour_avg, ls="none", marker="o", markersize=6)
-
-    _stab = interdaily_stability(_y, _y_hour_avg)
-    plt.annotate(f"stab={_stab:.3f}", (0, 1))
-    plt.show()
 
 def _test_interdaily_stability_trends():
     def _calc() -> tuple[np.ndarray, np.ndarray]:
@@ -135,15 +160,21 @@ def _test_interdaily_stability_trends():
     plt.show()
 
 
-def intradaily_variability(data: np.ndarray, subsampling_period: int) -> float:
-    ivs = reduce_periodic(__iv_square_diff_sum, data, subsampling_period)
-    iv = ivs.mean() * (subsampling_period / (subsampling_period-1))
-    return iv
+def intradaily_variability_subsampled(data: np.ndarray, subsampling_period: int) -> float:
+    ivs = reduce_periodic(intradaily_variability, data, subsampling_period)
+    return ivs.mean()
 
-def __iv_square_diff_sum(bin_: np.ndarray) -> float:
-    sq_diff = np.square(np.diff(bin_)).sum()
-    mss = np.square(bin_ - bin_.mean()).sum()        
-    return sq_diff / mss
+IVsub = intradaily_variability_subsampled
+
+# def intradaily_variability(data: np.ndarray, subsampling_period: int) -> float:
+#     ivs = reduce_periodic(__iv_square_diff_sum, data, subsampling_period)
+#     iv = ivs.mean() * (subsampling_period / (subsampling_period-1))
+#     return iv
+
+# def __iv_square_diff_sum(bin_: np.ndarray) -> float:
+#     sq_diff = np.square(np.diff(bin_)).sum()
+#     mss = np.square(bin_ - bin_.mean()).sum()        
+#     return sq_diff / mss
 
 def _test_intradaily_variability_trends():
     def _calc() -> tuple[np.ndarray, dict[int, np.ndarray]]:
@@ -160,7 +191,7 @@ def _test_intradaily_variability_trends():
             for scale in noise_scales:
                 noise = scale * np.random.randn(*_x.shape)
                 _y = _y_trend + noise
-                iv = intradaily_variability(_y, period)
+                iv = IVsub(_y, period)
                 ivs.append(iv)
             ivs_at_periods[period] = np.array(ivs)
         return noise_scales, ivs_at_periods
@@ -175,3 +206,21 @@ def _test_intradaily_variability_trends():
     plt.title("intradaily variability @ (noise/trend)")
     plt.legend()
     plt.grid()
+
+
+def relative_amplitude(hour_binned: np.ndarray) ->dict[str, float]:
+    """
+    `return {"M10": M10, "L5": L5, "RA": RA}`
+    calculate maximum over 10h mean (M10),
+    minimum over 5h mean (L5), 
+    relative amplitude RA=(M10-L5)/(M10+L5)  
+    """
+    assert len(hour_binned) == 24
+    cycled = np.tile(hour_binned, 3)[12:-12] # to prevent boundary effects
+    M10 = np.max(np.convolve(cycled, [1/10]*10, 'valid'))
+    L5 = np.min(np.convolve(cycled, [1/5]* 5, 'valid'))
+    RA = (M10 - L5)/(M10 + L5)
+    return {"M10": M10, "L5": L5, "RA": RA}
+
+
+RelAmp = relative_amplitude

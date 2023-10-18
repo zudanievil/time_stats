@@ -170,11 +170,6 @@ def predict(
     return link(mesor + amplitude * np.cos((PIx2 / period) * x + acrophase))
 
 
-def conv_average(y: _arr, n: int) -> _arr:
-    'sliding window average by convolution. n is window size'
-    kern = np.full(shape=n, fill_value=1/ n)
-    return np.convolve(y, kern, mode='same')
-
 
 # ==============================================
 # old code
