@@ -3,6 +3,7 @@ import sys, os
 import typing as _t
 
 import numpy as np
+from scipy import signal as s_signal
 
 if __name__ == "__main__":
     import matplotlib.pyplot as plt
@@ -222,5 +223,74 @@ def relative_amplitude(hour_binned: np.ndarray) ->dict[str, float]:
     RA = (M10 - L5)/(M10 + L5)
     return {"M10": M10, "L5": L5, "RA": RA}
 
-
 RelAmp = relative_amplitude
+
+
+def closest(a: np.ndarray, b) -> int:
+    'return argmin(abs(a - b))'
+    return np.argmin(np.abs(a - b))
+
+def PoV(a: np.ndarray, frequency: float, first_harmonic_range: tuple[float, float], n_harmonics=4) -> float:
+    f, s = s_signal.periodogram(a, frequency)
+    b, e = first_harmonic_range
+    full_auc = a.var(ddof=1) 
+    # ^^^ approximately equals the integral ` s[1:] @ np.diff(f) `
+    harmonic_auc = 0
+    for har in range(1, n_harmonics+1):
+        hb = har*b
+        he = har*e
+        ib = closest(f, hb)
+        ie = 1+ closest(f, he)
+        si = s[ib:ie]
+        fi = f[ib-1:ie]
+        assert len(si)>0 and len(fi)>1, f"{si=}, {fi=} {har=}"
+        harmonic_auc += si @ np.diff(fi)
+    return harmonic_auc / full_auc
+
+def conv_diff(a: np.ndarray, window_size: int) -> float:
+    kern = np.full(window_size, 1/window_size)
+    asmooth = np.convolve(a, kern, mode='same') # we'll truncate down below
+    hw = window_size//2
+    sq_diff = np.square(a[hw:-hw]-asmooth[hw:-hw])
+    return sq_diff.sum()/len(sq_diff)
+
+def petrosian_fractal_dimension(a: np.ndarray) -> float:
+    """
+    very weird measure. `1. < pfd < 1.072 when len(a) == 200` generally speaking, it's
+    somewhere between 1 and 1.14, depending on the len(a).
+    https://www.ncbi.nlm.nih.gov/pmc/articles/PMC3070217/
+    https://sci-hub.se/https://doi.org/10.1109/CBMS.1995.465426
+    """
+    diff_sign = np.sign(np.diff(a))
+    n_extrema = np.sum(diff_sign[1:] != diff_sign[:-1])
+    n = len(a)
+    logn = np.log10(n)
+    pfd = logn / (logn + np.log10(n/(n+0.4*n_extrema)))
+    return pfd
+  
+PFD = petrosian_fractal_dimension
+
+
+def higuchi_fractal_dimension(X, Kmax):
+    """ https://github.com/forrestbao/pyeeg/blob/master/pyeeg/fractal_dimension.py"""
+    L = []
+    x = []
+    N = len(X)
+    for k in range(1, Kmax):
+        Lk = []
+        for m in range(0, k):
+            Lmk = 0
+            for i in range(1, int(np.floor((N - m) / k))):
+                Lmk += abs(X[m + i * k] - X[m + i * k - k])
+            Lmk = Lmk * (N - 1) / np.floor((N - m) / float(k)) / k
+            Lk.append(Lmk)
+        L.append(np.log(np.mean(Lk)))
+        x.append([np.log(float(1) / k), 1])
+#     print(f"{L=}")
+#     print(f"{x=}")
+
+    (p, _, _, _) =np.linalg.lstsq(x, L, rcond=None)
+    return p[0]
+
+HFD = higuchi_fractal_dimension
+

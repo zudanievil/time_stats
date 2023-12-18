@@ -86,7 +86,7 @@ class DFA(_NT):
             l = len(x) // ws
             chunks = x[:l * ws].reshape((l, ws))  # 03 split into chunks
             chunks_detrended = _np.apply_along_axis(
-                self.detrend, axis=-1, arr=chunks,
+                self.detrend, axis=-1, arr=chunks, **self.detrend_kwargs,
             )  # 04 detrend
             rms = _np.apply_along_axis(
                 root_mean_square, arr=chunks_detrended, axis=-1
