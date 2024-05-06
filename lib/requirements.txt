@@ -1,0 +1,13 @@
+# python >= 3.9
+
+ipython
+jupyter
+
+numpy
+scipy
+pandas
+
+matplotlib
+
+statsmodels
+# scikit-learn
